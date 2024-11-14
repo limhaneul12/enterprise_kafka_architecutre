@@ -129,3 +129,4 @@ dmypy.json
 .pyre/
 .kafkalogging
 visualization
+.DS_Store
