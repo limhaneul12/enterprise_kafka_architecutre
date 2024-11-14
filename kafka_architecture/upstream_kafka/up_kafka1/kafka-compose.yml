@@ -1,0 +1,194 @@
+version: '3'
+
+services:
+  kafka-1:
+    image: confluentinc/cp-kafka:7.5.3
+    hostname: kafka1
+    container_name: kafka1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka1:19093,2@kafka2:29093,3@kafka3:39093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://kafka1:19092,CONTROLLER://kafka1:19093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka1:19092
+      KAFKA_LOG_DIRS: /kafka
+      AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_OPTS: -javaagent:/usr/share/jmx_exporter/jmx_prometheus_javaagent-1.0.1.jar=9097:/usr/share/jmx_exporter/kafka-broker.yml
+    ports:
+      - 19092:19092
+      - 9097:9999
+    volumes:
+      - ./.kafkalogging/kafka/logs/1:/kafka
+      - ./jmx_exporter:/usr/share/jmx_exporter/
+    networks:
+      - kafka-network-enter
+
+  kafka-2:
+    image: confluentinc/cp-kafka:7.5.3
+    hostname: kafka2
+    container_name: kafka2
+    environment:
+      KAFKA_NODE_ID: 2
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka1:19093,2@kafka2:29093,3@kafka3:39093"
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://kafka2:29092,CONTROLLER://kafka2:29093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka2:29092
+      KAFKA_LOG_DIRS: /kafka
+      AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_OPTS: -javaagent:/usr/share/jmx_exporter/jmx_prometheus_javaagent-1.0.1.jar=9098:/usr/share/jmx_exporter/kafka-broker.yml
+    ports:
+      - 29092:29092
+      - 9098:9999
+    volumes:
+      - ./.kafkalogging/kafka/logs/2:/kafka
+      - ./jmx_exporter:/usr/share/jmx_exporter/
+    networks:
+      - kafka-network-enter
+
+  kafka-3:
+    image: confluentinc/cp-kafka:7.5.3
+    hostname: kafka3
+    container_name: kafka3
+    environment:
+      KAFKA_NODE_ID: 3
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka1:19093,2@kafka2:29093,3@kafka3:39093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://kafka3:39092,CONTROLLER://kafka3:39093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka3:39092
+      KAFKA_LOG_DIRS: /kafka
+      AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_OPTS: -javaagent:/usr/share/jmx_exporter/jmx_prometheus_javaagent-1.0.1.jar=9099:/usr/share/jmx_exporter/kafka-broker.yml
+    ports:
+      - 39092:39092
+      - 9099:9999
+    volumes:
+      - ./.kafkalogging/kafka/logs/3:/kafka
+      - ./jmx_exporter:/usr/share/jmx_exporter/
+    networks:
+      - kafka-network-enter
+
+  akhq:
+    image: tchiotludo/akhq:latest
+    hostname: akhq
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    environment:
+      AKHQ_CONFIGURATION: |
+        akhq:
+          connections:
+            kafka:
+              properties:
+                bootstrap.servers: kafka1:19092,kafka2:29092,kafka3:39092
+    ports:
+      - 8081:8080
+    networks:
+      - kafka-network-enter
+
+  grafana:
+    image: grafana/grafana-oss:8.2.6
+    container_name: grafana
+    restart: unless-stopped
+    user: "1000:1000"
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./visualization/grafana:/var/lib/grafana
+    networks:
+      - kafka-network-enter
+
+  prometheus:
+    image: prom/prometheus
+    user: "1000:1000"
+    container_name: prometheus
+    volumes:
+      - ./visualization/prometheus/config:/etc/prometheus
+      - ./visualization/prometheus/volume:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--web.enable-lifecycle'
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    restart: unless-stopped
+    networks:
+      - kafka-network-enter
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter
+    container_name: kafka-exporter
+    ports:
+      - "9308:9308"
+    command:
+      - --kafka.server=kafka1:19092
+      - --kafka.server=kafka2:29092
+      - --kafka.server=kafka3:39092 
+    networks:
+      - kafka-network-enter
+    restart: unless-stopped
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+
+  kafka-connect:
+    image: confluentinc/cp-kafka-connect:6.2.0
+    hostname: kafka-connect
+    container_name: kafka-connect
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: kafka1:19092,kafka2:29092,kafka3:39092
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: kafka-s3-group
+      CONNECT_CONFIG_STORAGE_TOPIC: kafka-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: kafka-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: kafka-status
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components,/usr/share/java/kafka-connect/"
+      CONNECT_JMX_PORT: 9999
+      KAFKA_OPTS: "-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=9999 -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false"
+      CONNECT_PARTITION_DURATION_MS: 60000
+    command: 
+      - bash
+      - -c
+      - |
+        confluent-hub install --no-prompt confluentinc/kafka-connect-s3:latest
+        /etc/confluent/docker/run
+    ports:
+      - "8083:8083"
+    networks:
+      - kafka-network-enter
+
+  kafka-connect-ui:
+    image: landoop/kafka-connect-ui:0.9.6
+    hostname: kafka-connect-ui
+    depends_on:
+      - kafka-connect
+    ports:
+      - 8003:8000
+    networks:
+      - kafka-network-enter
+    environment:
+      CONNECT_URL: "http://kafka-connect:8083/"
+      PROXY: "true" 
+
+
+networks:
+  kafka-network-enter:
+    external: true
